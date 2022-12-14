@@ -35,12 +35,16 @@ class Controller extends BaseController
                 $request->timezone = 'Asia/Kolkata';
             }
 
+            $reqFrmTime = $request->ava_from_time;
+            $reqToTime = $request->ava_to_time;
+
             $coachData = CoachSchedule::select('user_id', 'coach_name', 'time_zone', 'day_of_week', 'start_time', 'end_time');
             if (!empty($userID)) {
                 $coachData = $coachData->where('user_id', $userID);
             }
             $coachData = $coachData->get();
             $responseData = [];
+            $checkAvaData = [];
             $tmpUserID = null;
             $tmpKey = 0;
             $responseData['zone'] = $request->timezone;
@@ -60,11 +64,16 @@ class Controller extends BaseController
                 $tmpTime = $startTimeObj->format('Y-m-d H:i:s');
                 $finalTime = $endTimeObj->format('Y-m-d H:i:s');
 
+                $checkAvaData[$tmpKey - 1]['user_id'] = $tmpUserID;
+                $checkAvaData[$tmpKey - 1]['user_name'] = $value->coach_name;
+                $checkAvaData[$tmpKey - 1]['ava_time'] = ["start" => $startTimeObj->format('H:i'), "end" => $endTimeObj->format('H:i')];
                 $i = 0;
                 do {
                     $lastTime = $tmpTime;
                     if ($i == 4) {
+                        $checkAvaData[$tmpKey - 1]['ava_time']["break_start"] = $startTimeObj->format('H:i');
                         $tmpTime = $startTimeObj->add(new DateInterval('PT30M'))->format('Y-m-d H:i:s');
+                        $checkAvaData[$tmpKey - 1]['ava_time']["break_end"] = $startTimeObj->format('H:i');
                     } else {
                         $tmpTime = $startTimeObj->add(new DateInterval('PT1H'))->format('Y-m-d H:i:s');
                         if ($tmpTime > $finalTime) {
@@ -76,12 +85,33 @@ class Controller extends BaseController
                 } while ($tmpTime < $finalTime);
             }
 
+            if (!empty($reqFrmTime) && !empty($reqToTime)) {
+                foreach ($checkAvaData as $key => $value) {
+                    $avaTime = $value['ava_time'];
+                    $from = Carbon::parse($reqFrmTime);
+                    $to = Carbon::parse($reqToTime);
+                    $start = Carbon::parse($avaTime['start']);
+                    $end = Carbon::parse($avaTime['end']);
+                    $breakStart = Carbon::parse($avaTime['break_start']);
+                    $breakStart = Carbon::parse($avaTime['break_end']);
+
+                    if (($from->between($start, $end, true) && $to->between($start, $end, true)) && (!$from->between($breakStart, $breakStart, true) && !$to->between($breakStart, $breakStart, true))
+                    ) {
+                        $availableCoaches[] = ['id' => $value['user_id'], 'name' => $value['user_name']];
+                    }
+                }
+                if (empty($availableCoaches)) {
+                    return response(["Coaches are not available"], 404);
+                }
+                return $availableCoaches;
+            }
+
             if (!empty($userID)) {
                 $responseData = $responseData['coaches'][0];
             }
 
             $responseData['zone'] = $request->timezone;
-            return $responseData;
+            return [$checkAvaData, $responseData];
         } catch (Exception $e) {
             return response([$e->getMessage()], 422);
         }
